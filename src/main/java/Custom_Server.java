@@ -155,7 +155,6 @@ public class Custom_Server extends Thread {
         while(rs.next()){
             COUNT = rs.getInt(1);
         }
-        stmt.executeUpdate(sql);
         JSONObject response=new JSONObject();
         response.put("SENDER_TYPE", "SERVER");
         response.put("MESSAGE_TYPE", "LOGIN_REPONSE");
@@ -165,6 +164,8 @@ public class Custom_Server extends Thread {
             System.out.println("성공");
             String token=createToken(id);
             sql="UPDATE USER SET token ='"+token+"' WHERE USERNAME ='"+id+"'";
+
+            stmt.executeUpdate(sql);
             response.put("RESPONSE_CODE", 1);
             response.put("TOKEN", token);
             send(response.toString());
