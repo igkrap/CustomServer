@@ -224,7 +224,6 @@ public class Custom_Server extends Thread {
         try {
             ServerSocket ss = new ServerSocket(socket);
             System.out.println("서버 열림");
-            validateToken(createToken("dd"));
             DBcon();
             while (true) {
                 Socket user = ss.accept();
