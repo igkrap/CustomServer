@@ -30,6 +30,7 @@ import io.jsonwebtoken.SignatureAlgorithm;
 
 public class Custom_Server extends Thread {
     static ArrayList<Custom_Server> clients = new ArrayList<Custom_Server>();
+    static String key = "AVDSDCSDCSFBSFBDFASSDFSDFSDFSDDDF";
     Socket socket;
     String type;
     static String driver = "org.mariadb.jdbc.Driver";
@@ -37,32 +38,44 @@ public class Custom_Server extends Thread {
     Statement stmt;
     ResultSet rs;
 
-    public Custom_Server(Socket socket) {
+    public Custom_Server(Socket socket) throws Exception {
         this.socket = socket;
         clients.add(this);
         System.out.println("접속자 수:"+clients.size());
+        //this.socket.setSoTimeout(15000);
+
     }
     @Override
     public void run() {
         try {
             while (true) {
-                String s,response="";
+                String s, response = "";
                 InputStream input = socket.getInputStream();
-                BufferedReader reader = new BufferedReader(new InputStreamReader(input,"UTF-8")); // 읽기
+                BufferedReader reader = new BufferedReader(new InputStreamReader(input, "UTF-8")); // 읽기
                 if ((s = reader.readLine()) != null) {
                     System.out.println(s);
+//                    for (Custom_Server c: clients) {
+//                        c.send(s);
+//                    }
                     JSONObject jObject = new JSONObject(s);
-                    switch(jObject.getString("SENDER_TYPE")) {
-                        case "USER": this.receiveUserRequest(jObject); break;
-                        case "SENSOR": this.receiveSensorData(jObject); break;
-                        case "ACTUATOR": this.receiveActuatorData(jObject); break;
-                        default: break;
+                    switch (jObject.getString("SENDER_TYPE")) {
+                        case "USER":
+                            this.receiveUserRequest(jObject);
+                            break;
+                        case "SENSOR":
+                            this.receiveSensorData(jObject);
+                            break;
+                        default:
+                            break;
                     }
                 }
             }
-        } catch (IOException | SQLException e) {
+            } catch (UnsupportedEncodingException unsupportedEncodingException) {
+            unsupportedEncodingException.printStackTrace();
+        }
+     catch (IOException e) {
             // TODO Auto-generated catch block
-            e.printStackTrace();
+            System.out.println("소켓연결이 끊겼습니다.");
         } catch (Exception e) {
             // TODO Auto-generated catch block
             e.printStackTrace();
@@ -70,8 +83,6 @@ public class Custom_Server extends Thread {
     }
     public static String createToken(String username) throws Exception, Exception
     {
-        String key = "AVDSDCSDCSFBSFBDFASSDFSDFSDFSDDDF";
-
         Map<String, Object> headers = new HashMap<>();
         headers.put("typ", "JWT");
         headers.put("alg", "HS256");
@@ -79,7 +90,9 @@ public class Custom_Server extends Thread {
         Map<String, Object> payloads = new HashMap<>();
         Long expiredTime = 1000*60*60*24l; // 만료기간 1일
         Date now = new Date();
+        System.out.println("토큰 생성 : " +now);
         now.setTime(now.getTime() + expiredTime);
+        System.out.println("토큰 만료 : " +now);
         payloads.put("exp", now);
         payloads.put("data", username);
 
@@ -88,19 +101,19 @@ public class Custom_Server extends Thread {
                 .setClaims(payloads)
                 .signWith(SignatureAlgorithm.HS256, key.getBytes())
                 .compact();
-        System.out.println(jwt);
+        //System.out.println(jwt);
         return jwt;
     }
        public static boolean validateToken(String jwtTokenString) throws InterruptedException {
 	   try {
 	   Claims claims = Jwts.parser()
-	        .setSigningKey("AVDSDCSDCSFBSFBDFASSDFSDFSDFSDDDF".getBytes())
+	        .setSigningKey(key.getBytes())
 	        .parseClaimsJws(jwtTokenString)
 	        .getBody();
 	   Date expiration = claims.get("exp", Date.class);
-	   System.out.println(expiration);
-	   return expiration.before(new Date());
+	   return expiration.after(new Date());
 	   }catch(Exception e) {
+	       e.printStackTrace();
 		   return false;
 	   }
 	}
@@ -123,7 +136,7 @@ public class Custom_Server extends Thread {
             e.printStackTrace();
         }
     }
-    void sendToTargets(String data) throws Exception {
+    void sendToTarget(String data) throws Exception {
         for (Custom_Server client : clients) {
             //if (something~){
             //client.send(data);}
@@ -138,13 +151,43 @@ public class Custom_Server extends Thread {
         PrintWriter writer = new PrintWriter(osw1, true); //
         writer.println(data);
     }
-    void orderRawMaterial(JSONObject jo) throws SQLException {
-        int mat_index=jo.getInt("MATERIAL_INDEX");
-        int amount=jo.getInt("AMOUNT");
-        String sql= "UPDATE raw_material SET amount = amount+"+amount+" WHERE INDEX ="+mat_index;
+    void orderOre(JSONObject jo) throws Exception {
+        int amount=jo.getInt("COAL");
+        String sql= "UPDATE ORE SET AMOUNT = AMOUNT+"+amount+" WHERE ID ="+2;
         stmt=con.createStatement();
         stmt.executeUpdate(sql);
+        amount=jo.getInt("IRON");
+        sql="UPDATE ORE SET AMOUNT = AMOUNT+"+amount+" WHERE ID ="+1;
+        stmt=con.createStatement();
+        stmt.executeUpdate(sql);
+        sql="SELECT * FROM ORE";
+        rs=stmt.executeQuery(sql);
+        JSONObject response=new JSONObject();
+        response.put("SENDER_TYPE", "SERVER");
+        response.put("MESSAGE_TYPE", "ORE_AMOUNT_DATA");
+        while(rs.next()){
+            response.put(rs.getString(2),rs.getInt(3));
+        }
+        send(response.toString());
     }
+    void chooseCountryResponse(JSONObject jo) throws Exception {
+        String country=jo.getString("COUNTRY");
+        String sql="SELECT * FROM ORE_PRICE_TREND WHERE COUNTRY='"+country+"'";
+        stmt = con.createStatement();
+        rs=stmt.executeQuery(sql);
+        JSONObject response=new JSONObject();
+        response.put("SENDER_TYPE", "SERVER");
+        response.put("MESSAGE_TYPE","ORE_COUNTRY_DATA");
+        while(rs.next()) {
+            String code = rs.getString(3).substring(0, 1) + rs.getString(4).substring(0, 1);
+            response.put(code, rs.getInt(5));
+        }
+        send(response.toString());
+    }
+    void broadCastOreData(){
+        //String sql="SELECT * FROM ORE_PRICE_TREND WHERE COUNTRY='"+country+"'";
+    }
+    void broadCast(){}
     void login(JSONObject jo) throws Exception {
         int COUNT=0;
         String id = jo.getString("ID");
@@ -158,13 +201,11 @@ public class Custom_Server extends Thread {
         JSONObject response=new JSONObject();
         response.put("SENDER_TYPE", "SERVER");
         response.put("MESSAGE_TYPE", "LOGIN_REPONSE");
-
         if (COUNT>=1)
         {
             System.out.println("성공");
             String token=createToken(id);
             sql="UPDATE USER SET token ='"+token+"' WHERE USERNAME ='"+id+"'";
-
             stmt.executeUpdate(sql);
             response.put("RESPONSE_CODE", 1);
             response.put("TOKEN", token);
@@ -177,15 +218,52 @@ public class Custom_Server extends Thread {
             socket.close();
         }
     }
-    void enter(JSONObject jo){
-        switch (jo.getString("FORM_TYPE")){
+    void enter(JSONObject jo) throws Exception {
+        String AccessForm=jo.getString("FORM_TYPE");
+        System.out.println("토큰성공");
+        String Token=jo.getString("TOKEN");
+        if (!validateToken(Token)) return;
+        String sql="UPDATE USER SET ACCESSFORM='"+AccessForm+"' WHERE TOKEN ='"+Token+"'";
+        stmt.executeUpdate(sql);
+        JSONObject response=new JSONObject();
+        response.put("SENDER_TYPE", "SERVER");
+        response.put("MESSAGE_TYPE", "FORM_DATA");
+        response.put("FORM_TYPE", AccessForm);
+        switch (AccessForm){
             case "DASHBOARD":
                 break;
-            case "ORDER_RAW":
+            case "ORE":
+                sql = "SELECT * FROM ORE_PRICE_TREND";
+                rs = stmt.executeQuery(sql);
+                while(rs.next()){
+                        if(rs.getString(4).equals("THISMONTH")) {
+                            String code = rs.getString(2).substring(0, 2) + rs.getString(3).substring(0, 1);
+                            response.put(code, rs.getInt(5));
+                        }
+                }
+                sql = "SELECT * FROM ORE";
+                rs =stmt.executeQuery(sql);
+                while(rs.next()){
+                    response.put(rs.getString(2)+"_AMOUNT",rs.getInt(3));
+                }
+                System.out.println(response.toString());
+                //response={"SENDER_TYPE":"SERVER","MESSAGE_TYPE":"FORM_DATA","FORM_TYPE":"ORE","AUI":... , "IRON_AMOUNT":...,"COAL_AMOUNT":...}
+                send(response.toString());
                 break;
             case "SCHEDULE":
+                int index = 10;
+                int page = jo.getInt("PAGE_NUM");
+                response.put("MESSAGE_TYPE", "SCHEDULE_DATA");
+                sql = "SELECT * FROM SCHEDULE LIMIT "+(page-1)*index+","+index;
+                rs = stmt.executeQuery(sql);
+                while(rs.next()){
+                    String code=rs.getString(2).substring(0,2)+rs.getString(3).substring(0,1)+rs.getString(4).substring(0,1);
+                    response.put(code,rs.getInt(5));
+                }
+                send(response.toString());
                 break;
             case "MONITORING_CONTROL":
+
                 break;
             case "PRODUCT":
                 break;
@@ -204,16 +282,21 @@ public class Custom_Server extends Thread {
             case "ENTER_FORM_REQUEST":
                 enter(jo);
                 break;
-            case "ORDER_RAW_REQUEST":
-                orderRawMaterial(jo);
+            case "ORE_ORDER_REQUEST":
+                orderOre(jo);
                 break;
-
-            default : break;
+            case "ORE_COUNTRY_REQUEST":
+                chooseCountryResponse(jo);
+                break;
+            case "ALIVE":
+                break;
+            default :
+                break;
         }
     }
-
     void receiveActuatorData(JSONObject jo) {}
-    void receiveSensorData(JSONObject jo) {}
+    void receiveSensorData(JSONObject jo) {
+    }
     void sendSensorDataToClient() {}
     void sendLoginResponseToClient() {}
     void sendActuatorDataToClient() {}
@@ -226,6 +309,25 @@ public class Custom_Server extends Thread {
             ServerSocket ss = new ServerSocket(socket);
             System.out.println("서버 열림");
             DBcon();
+//            Statement stm = con.createStatement();;
+//            ResultSet rss;
+//            String sql;
+//            JSONObject response=new JSONObject();
+//            response.put("MESSAGE_TYPE", "ORE_PRICE_DATA");
+//            sql = "SELECT * FROM ORE_PRICE_TREND";
+//            rss = stm.executeQuery(sql);
+//            int dd=0;
+//            while(rss.next()){
+//                String code=rss.getString(2).substring(0,2)+rss.getString(3).substring(0,1)+rss.getString(4).substring(0,1);
+//                response.put(code,rss.getInt(5));
+//            }
+//            sql = "SELECT * FROM ORE";
+//            rss =stm.executeQuery(sql);
+//            while(rss.next()){
+//                response.put(rss.getString(2)+"_AMOUNT",rss.getInt(3));
+//            }
+//            System.out.println(response.toString());
+
             while (true) {
                 Socket user = ss.accept();
                 System.out.println("클라이언트 입장 " + user.getLocalAddress() + " : " + user.getLocalPort());
