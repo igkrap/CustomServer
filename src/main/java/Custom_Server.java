@@ -32,7 +32,7 @@ public class Custom_Server extends Thread {
     static ArrayList<Custom_Server> clients = new ArrayList<Custom_Server>();
     static String key = "AVDSDCSDCSFBSFBDFASSDFSDFSDFSDDDF";
     Socket socket;
-    String type;
+    String type="",name="";
     static String driver = "org.mariadb.jdbc.Driver";
     static Connection con;
     Statement stmt;
@@ -58,12 +58,16 @@ public class Custom_Server extends Thread {
 //                        c.send(s);
 //                    }
                     JSONObject jObject = new JSONObject(s);
+//                    System.out.println(jObject.getString("SENDER_TYPE")+" "+jObject.getString("MESSAGE_TYPE")+" "+jObject.getString("NAME"));
                     switch (jObject.getString("SENDER_TYPE")) {
                         case "USER":
                             this.receiveUserRequest(jObject);
                             break;
                         case "SENSOR":
                             this.receiveSensorData(jObject);
+                            break;
+                        case "ACTUATOR":
+                            this.receiveActuatorData(jObject);
                             break;
                         default:
                             break;
@@ -144,8 +148,11 @@ public class Custom_Server extends Thread {
     }
     void init(JSONObject jo) {
         this.type=jo.getString("SENDER_TYPE");
+        this.name=jo.getString("NAME");
+        System.out.println(this.name);
     }
     void send(String data) throws Exception {
+        System.out.println("보낸 메시지2:"+data.toString());
         OutputStream out = socket.getOutputStream(); // 쓰기
         OutputStreamWriter osw1 = new OutputStreamWriter(out, "utf-8");
         PrintWriter writer = new PrintWriter(osw1, true); //
@@ -158,18 +165,9 @@ public class Custom_Server extends Thread {
         stmt.executeUpdate(sql);
         amount=jo.getInt("IRON");
         sql="UPDATE ORE SET AMOUNT = AMOUNT+"+amount+" WHERE ID ="+1;
-        stmt=con.createStatement();
-        stmt.executeUpdate(sql);
-        sql="SELECT * FROM ORE";
-        rs=stmt.executeQuery(sql);
-        JSONObject response=new JSONObject();
-        response.put("SENDER_TYPE", "SERVER");
-        response.put("MESSAGE_TYPE", "ORE_AMOUNT_DATA");
-        while(rs.next()){
-            response.put(rs.getString(2),rs.getInt(3));
-        }
-        send(response.toString());
+        broadCastOreData();
     }
+
     void chooseCountryResponse(JSONObject jo) throws Exception {
         String country=jo.getString("COUNTRY");
         String sql="SELECT * FROM ORE_PRICE_TREND WHERE COUNTRY='"+country+"'";
@@ -184,8 +182,21 @@ public class Custom_Server extends Thread {
         }
         send(response.toString());
     }
-    void broadCastOreData(){
-        //String sql="SELECT * FROM ORE_PRICE_TREND WHERE COUNTRY='"+country+"'";
+    void broadCastOreData() throws Exception {
+        String sql="SELECT * FROM ORE";
+        stmt = con.createStatement();
+        rs=stmt.executeQuery(sql);
+        JSONObject response=new JSONObject();
+        response.put("SENDER_TYPE", "SERVER");
+        response.put("MESSAGE_TYPE","ORE_AMOUNT_DATA");
+        while(rs.next()) {
+            response.put(rs.getString(2),rs.getInt(3));
+        }
+        for (Custom_Server c :clients){
+            if(c.type.equals("user")) {
+                c.send(response.toString());
+            }
+        }
     }
     void broadCast(){}
     void login(JSONObject jo) throws Exception {
@@ -288,19 +299,55 @@ public class Custom_Server extends Thread {
             case "ORE_COUNTRY_REQUEST":
                 chooseCountryResponse(jo);
                 break;
+            case "CONTROLL_REQUEST":
+                sendOrderToMachine(jo.getString("TARGET"),jo.getString("ORDER"));
+                break;
             case "ALIVE":
                 break;
             default :
                 break;
         }
     }
-    void receiveActuatorData(JSONObject jo) {}
+    void receiveActuatorData(JSONObject jo) {
+        switch(jo.getString("MESSAGE_TYPE")) {
+            case "INIT":
+                init(jo);
+                break;
+            case "ALIVE":
+                break;
+            default :
+                break;
+        }
+    }
     void receiveSensorData(JSONObject jo) {
+    }
+    public static boolean isNumeric(String s) {
+        try {
+            Double.parseDouble(s);
+            return true;
+        } catch(NumberFormatException e) {
+            return false;
+        }
     }
     void sendSensorDataToClient() {}
     void sendLoginResponseToClient() {}
     void sendActuatorDataToClient() {}
-    void sendOrderToMachine() {}
+    void sendOrderToMachine(String target,String order) throws Exception {
+        JSONObject order_data=new JSONObject();
+        order_data.put("SENDER_TYPE","SERVER");
+        if(order.equals("ON")||order.equals("OFF")) {
+            order_data.put("MESSAGE_TYPE", "ONOFF");
+            order_data.put("DATA",order);
+        }
+        if(isNumeric(order)) {
+            order_data.put("MESSAGE_TYPE", "VALUE");
+            order_data.put("DATA",Integer.parseInt(order));
+        }
+        System.out.println("보낸 메시지1:"+order_data.toString());
+        for(Custom_Server c : clients){
+            if(c.name.equals(target)) c.send(order_data.toString());
+        }
+    }
 
     public static void main(String[] args) {
         // TODO Auto-generated method stub
