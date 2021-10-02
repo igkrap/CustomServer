@@ -42,7 +42,7 @@ public class Custom_Server extends Thread {
         this.socket = socket;
         clients.add(this);
         System.out.println("접속자 수:"+clients.size());
-        //this.socket.setSoTimeout(15000);
+        this.socket.setSoTimeout(15000);
 
     }
     @Override
@@ -146,13 +146,22 @@ public class Custom_Server extends Thread {
             //client.send(data);}
         }
     }
-    void init(JSONObject jo) {
+    void init(JSONObject jo) throws SQLException {
         this.type=jo.getString("SENDER_TYPE");
         this.name=jo.getString("NAME");
-        System.out.println(this.name);
+        if(this.type.equals("ACTUATOR")||this.type.equals("SENSOR"))
+        {
+//            String sql="SELECT * FROM MACHINE";
+//            stmt=con.createStatement();
+//            rs=stmt.executeQuery(sql);
+//            while(rs.next()){
+//                rs.getString();
+//            }
+        }
+            System.out.println(this.name);
     }
     void send(String data) throws Exception {
-        System.out.println("보낸 메시지2:"+data.toString());
+        System.out.println(this.name+"에게 :"+data);
         OutputStream out = socket.getOutputStream(); // 쓰기
         OutputStreamWriter osw1 = new OutputStreamWriter(out, "utf-8");
         PrintWriter writer = new PrintWriter(osw1, true); //
@@ -198,6 +207,7 @@ public class Custom_Server extends Thread {
             }
         }
     }
+//    void broadC
     void broadCast(){}
     void login(JSONObject jo) throws Exception {
         int COUNT=0;
@@ -261,23 +271,18 @@ public class Custom_Server extends Thread {
                 //response={"SENDER_TYPE":"SERVER","MESSAGE_TYPE":"FORM_DATA","FORM_TYPE":"ORE","AUI":... , "IRON_AMOUNT":...,"COAL_AMOUNT":...}
                 send(response.toString());
                 break;
-            case "SCHEDULE":
-                int index = 10;
-                int page = jo.getInt("PAGE_NUM");
-                response.put("MESSAGE_TYPE", "SCHEDULE_DATA");
-                sql = "SELECT * FROM SCHEDULE LIMIT "+(page-1)*index+","+index;
+
+            case "CONTROL":
+                sql= "SELECT * FROM MACHINE";
                 rs = stmt.executeQuery(sql);
                 while(rs.next()){
-                    String code=rs.getString(2).substring(0,2)+rs.getString(3).substring(0,1)+rs.getString(4).substring(0,1);
-                    response.put(code,rs.getInt(5));
+                    if(rs.getString(4).equals("THISMONTH")) {
+                        String code = rs.getString(2).substring(0, 2) + rs.getString(3).substring(0, 1);
+                        response.put(code, rs.getInt(5));
+                    }
                 }
-                send(response.toString());
                 break;
-            case "MONITORING_CONTROL":
 
-                break;
-            case "PRODUCT":
-                break;
             default:
                 break;
         }
@@ -300,7 +305,8 @@ public class Custom_Server extends Thread {
                 chooseCountryResponse(jo);
                 break;
             case "CONTROLL_REQUEST":
-                sendOrderToMachine(jo.getString("TARGET"),jo.getString("ORDER"));
+                controlMachine(jo);
+                //sendOrderToMachine(jo.getString("TARGET"),jo.getString("ORDER"));
                 break;
             case "ALIVE":
                 break;
@@ -308,7 +314,25 @@ public class Custom_Server extends Thread {
                 break;
         }
     }
-    void receiveActuatorData(JSONObject jo) {
+    void controlMachine(JSONObject jo) throws Exception {
+        String sql= "UPDATE MACHINE SET POWER= '"+jo.getString("POWER")+"'" +
+                ", VALUE=" +jo.getInt("VALUE")+
+                " WHERE NAME='"+jo.getString("TARGET")+"'";
+        stmt=con.createStatement();
+        stmt.executeUpdate(sql);
+        sql="SELECT * FROM MACHINE WHERE NAME='"+jo.getString("TARGET")+"'";
+        stmt=con.createStatement();
+        rs=stmt.executeQuery(sql);
+        while(rs.next()){
+            System.out.println(rs.getString("NAME")+rs.getString("POWER")+rs.getInt("VALUE"));
+            sendOrderToMachine(rs.getString("NAME"),rs.getString("POWER"),rs.getInt("VALUE"));
+            for (Custom_Server c: clients) {
+
+            }
+        }
+
+    }
+    void receiveActuatorData(JSONObject jo) throws SQLException {
         switch(jo.getString("MESSAGE_TYPE")) {
             case "INIT":
                 init(jo);
@@ -332,19 +356,25 @@ public class Custom_Server extends Thread {
     void sendSensorDataToClient() {}
     void sendLoginResponseToClient() {}
     void sendActuatorDataToClient() {}
-    void sendOrderToMachine(String target,String order) throws Exception {
+    void sendOrderToMachine(String target,String power,int value) throws Exception {
         JSONObject order_data=new JSONObject();
         order_data.put("SENDER_TYPE","SERVER");
-        if(order.equals("ON")||order.equals("OFF")) {
-            order_data.put("MESSAGE_TYPE", "ONOFF");
-            order_data.put("DATA",order);
+        order_data.put("MESSAGE_TYPE", "STATUS");
+        order_data.put("POWER",power);
+        switch (value){
+            case 0:
+                order_data.put("VALUE","ZERO");
+                break;
+            case 1:
+                order_data.put("VALUE","ONE");
+                break;
+            case 2:
+                order_data.put("VALUE","TWO");
+                break;
         }
-        if(isNumeric(order)) {
-            order_data.put("MESSAGE_TYPE", "VALUE");
-            order_data.put("DATA",Integer.parseInt(order));
-        }
-        System.out.println("보낸 메시지1:"+order_data.toString());
+
         for(Custom_Server c : clients){
+            System.out.println("sendOrderToMachine: "+c.name);
             if(c.name.equals(target)) c.send(order_data.toString());
         }
     }
