@@ -80,6 +80,7 @@ public class Custom_Server extends Thread {
         }
      catch (IOException e) {
             // TODO Auto-generated catch block
+            e.printStackTrace();
             System.out.println(this.name+"소켓연결이 끊겼습니다.");
         } catch (Exception e) {
             // TODO Auto-generated catch block
@@ -180,20 +181,22 @@ public class Custom_Server extends Thread {
             System.out.println(this.name);
     }
     void send(String data) throws Exception {
-        System.out.println(this.name+"에게 :"+data);
+        System.out.println(this.name + "에게 :" + data);
         OutputStream out = socket.getOutputStream(); // 쓰기
         OutputStreamWriter osw1 = new OutputStreamWriter(out, "utf-8");
         PrintWriter writer = new PrintWriter(osw1, true); //
         writer.println(data);
     }
     void orderOre(JSONObject jo) throws Exception {
-        int amount=jo.getInt("COAL");
+        String amount=jo.getString("COAL");
         String sql= "UPDATE ORE SET AMOUNT = AMOUNT+"+amount+" WHERE ID ="+2;
         stmt=con.createStatement();
         stmt.executeUpdate(sql);
-        amount=jo.getInt("IRON");
+        amount=jo.getString("IRON");
         sql="UPDATE ORE SET AMOUNT = AMOUNT+"+amount+" WHERE ID ="+1;
-        broadCastOreData();
+        stmt=con.createStatement();
+        stmt.executeUpdate(sql);
+        multiCastOreData();
     }
 
     void chooseCountryResponse(JSONObject jo) throws Exception {
@@ -212,7 +215,7 @@ public class Custom_Server extends Thread {
         }
         send(response.toString());
     }
-    void broadCastOreData() throws Exception {
+    void multiCastOreData() throws Exception {
         String sql="SELECT * FROM ORE";
         stmt = con.createStatement();
         rs=stmt.executeQuery(sql);
@@ -294,7 +297,7 @@ public class Custom_Server extends Thread {
                 send(response.toString());
                 break;
             case "CONTROL":
-                sql= "SELECT * FROM MACHINE";
+                sql= "SELECT * FROM MACHINE WHERE TYPE='ACTUATOR'";
                 rs = stmt.executeQuery(sql);
                 while(rs.next()){
                     response.put(rs.getString(3), rs.getString(7)+"_"+rs.getInt(8));
@@ -356,13 +359,21 @@ public class Custom_Server extends Thread {
         stmt.executeUpdate(sql);
         sql="SELECT * FROM MACHINE WHERE NAME='"+jo.getString("TARGET")+"'";
         rs=stmt.executeQuery(sql);
+        JSONObject response=new JSONObject();
+        response.put("SENDER_TYPE", "SERVER");
+        response.put("MESSAGE_TYPE","FORM_DATA");
+        response.put("FORM_TYPE","CONTROL");
+        response.put("DATA_TYPE","CONDITION");
         while(rs.next()){
             System.out.println(rs.getString("NAME")+rs.getString("POWER")+rs.getInt("VALUE"));
+            response.put(rs.getString("NAME"),rs.getString("POWER")+"_"+rs.getInt("VALUE"));
             sendOrderToMachine(rs.getString("NAME"),rs.getString("POWER"),rs.getInt("VALUE"));
+
 //            for (Custom_Server c: clients) {
 //
 //            }
         }
+        sendToUser(response);
 
     }
     void receiveActuatorData(JSONObject jo) throws SQLException {
