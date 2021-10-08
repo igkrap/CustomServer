@@ -59,6 +59,7 @@ public class Custom_Server extends Thread {
 //                    }
                     JSONObject jObject = new JSONObject(s);
 //                    System.out.println(jObject.getString("SENDER_TYPE")+" "+jObject.getString("MESSAGE_TYPE")+" "+jObject.getString("NAME"));
+
                     switch (jObject.getString("SENDER_TYPE")) {
                         case "USER":
                             this.receiveUserRequest(jObject);
@@ -95,21 +96,35 @@ public class Custom_Server extends Thread {
                     jsonObject.put("CONNECT_STATUS",findMachineStatusByName(this.name));
                 }
                 else if(this.type.equals("USER")){
-                    String sql="UPDATE USER SET CONNECT_STATUS='DISCONNECT',ACCESSFORM='' WHERE USERNAME='"+this.name+"'";
+                    String sql="UPDATE USER SET CONNECT_STATUS='DISCONNECT',ACCESSFORM='-' WHERE USERNAME='"+this.name+"'";
                     stmt.executeUpdate(sql);
                     jsonObject.put("DATA_TYPE","USER");
                     jsonObject.put("CONNECT_STATUS",findUserStatusByName(this.name));
                 }
                 jsonObject.put("NAME",this.name);
-
                 System.out.println("MANAGE 접속중인 유저에게 :"+jsonObject.toString());
                 sendToUser(jsonObject);
+
             } catch (Exception e2) {
 
                 e2.printStackTrace();
             }
 
         }
+    }
+    public void saveLog(String ip,String c_type,String log_lv,String log_information,String activity) throws Exception {
+        String sql="INSERT INTO LOG (ACCESS_IP,CLIENT_TYPE,LOG_LEVEL,INFORMATION,ACTIVITY) VALUES ('"+ip+"','"+c_type+"','"+log_lv+"','"+log_information+"','"+activity+"')";
+        stmt.executeUpdate(sql);
+        JSONObject jsonObject=new JSONObject();
+        jsonObject.put("SENDER_TYPE", "SERVER");
+        jsonObject.put("MESSAGE_TYPE", "FORM_DATA");
+        jsonObject.put("FORM_TYPE","MANAGE");
+        jsonObject.put("DATA_TYPE", "LOG");
+        jsonObject.put("DATA","["+c_type+"] "+this.name+" - "+ip+" "+log_lv+" "+log_information+" "+activity);
+        sendToUser(jsonObject);
+    }
+    public void searchLog(){
+
     }
     public static String createToken(String username) throws Exception, Exception
     {
@@ -324,7 +339,7 @@ public class Custom_Server extends Thread {
         }
         JSONObject response=new JSONObject();
         response.put("SENDER_TYPE", "SERVER");
-        response.put("MESSAGE_TYPE", "LOGIN_REPONSE");
+        response.put("MESSAGE_TYPE", "LOGIN_RESPONSE");
         if (COUNT>=1)
         {
             System.out.println("성공");
@@ -334,11 +349,13 @@ public class Custom_Server extends Thread {
             response.put("RESPONSE_CODE", 1);
             response.put("TOKEN", token);
             send(response.toString());
+            saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"COMMON","","LOGIN");
         }
         else {
             System.out.println("실패");
             response.put("RESPONSE_CODE", 2);
             send(response.toString());
+            saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"WARNING","로그인 실패","LOGIN");
             socket.close();
         }
     }
@@ -353,8 +370,15 @@ public class Custom_Server extends Thread {
         response.put("DATA_TYPE","INITIALIZATION");
         switch (AccessForm){
             case "DASHBOARD":
+                saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"COMMON","",jo.getString("MESSAGE_TYPE"));
                 break;
             case "ORE":
+                System.out.println(findUserRoleByToken(jo.getString("TOKEN")));
+                if (!findUserRoleByToken(jo.getString("TOKEN")).equals("OPERATOR")&&!findUserRoleByToken(jo.getString("TOKEN")).equals("ADMIN")) {
+                    saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"WARNING","권한 오류",jo.getString("MESSAGE_TYPE"));
+                    return;
+                }
+                saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"COMMON","",jo.getString("MESSAGE_TYPE"));
                 sql = "SELECT * FROM ORE_PRICE_TREND";
                 rs = stmt.executeQuery(sql);
                 while(rs.next()){
@@ -373,6 +397,13 @@ public class Custom_Server extends Thread {
                 send(response.toString());
                 break;
             case "CONTROL":
+                if (!findUserRoleByToken(jo.getString("TOKEN")).equals("OPERATOR")&&!findUserRoleByToken(jo.getString("TOKEN")).equals("ADMIN")) {
+
+                    saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"WARNING","권한 오류",jo.getString("MESSAGE_TYPE"));
+                    return;
+                }
+                saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"COMMON","",jo.getString("MESSAGE_TYPE"));
+
                 sql= "SELECT * FROM MACHINE WHERE TYPE='ACTUATOR'";
                 rs = stmt.executeQuery(sql);
                 while(rs.next()){
@@ -381,6 +412,10 @@ public class Custom_Server extends Thread {
                 send(response.toString());
                 break;
             case "MANAGE":
+                if (!findUserRoleByToken(jo.getString("TOKEN")).equals("OPERATOR")&&!findUserRoleByToken(jo.getString("TOKEN")).equals("ADMIN")) {
+                    saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"WARNING","권한 오류",jo.getString("MESSAGE_TYPE"));
+                    return;
+                }
                 JSONArray machineArray=new JSONArray();
                 JSONArray userArray=new JSONArray();
                 JSONArray logArray=new JSONArray();
@@ -420,7 +455,8 @@ public class Custom_Server extends Thread {
                 response.put("USER",userArray);
                 //response.put("LOG",logArray);
                 send(response.toString());
-            default:
+                saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"COMMON","",jo.getString("MESSAGE_TYPE"));
+                default:
                 break;
         }
     }
@@ -435,11 +471,15 @@ public class Custom_Server extends Thread {
     }
     void receiveUserRequest(JSONObject jo) throws Exception {
         String Token;
+
         switch(jo.getString("MESSAGE_TYPE")) {
             case "INIT":
                 Token=jo.getString("TOKEN");
-                if (!validateToken(Token)) return;
+                if (!validateToken(Token)) {
+                    saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"WARNING","TOKEN_VALIDATE_ERROR",jo.getString("MESSAGE_TYPE"));
+                    return;}
                 System.out.println("토큰성공");
+                saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"COMMON","",jo.getString("MESSAGE_TYPE"));
                 init(jo);
                 break;
             case "LOGIN_REQUEST":
@@ -447,33 +487,77 @@ public class Custom_Server extends Thread {
                 break;
             case "ENTER_FORM_REQUEST":
                 Token=jo.getString("TOKEN");
-                if (!validateToken(Token)) return;
+                if (!validateToken(Token)) { saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"WARNING","TOKEN_VALIDATE_ERROR",jo.getString("MESSAGE_TYPE"));
+                    return;}
+
                 System.out.println("토큰성공");
                 enter(jo);
                 break;
             case "ORE_ORDER_REQUEST":
                 Token=jo.getString("TOKEN");
-                if (!validateToken(Token)) return;
+                if (!validateToken(Token)) { saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"WARNING","TOKEN_VALIDATE_ERROR",jo.getString("MESSAGE_TYPE"));
+                    return;}
+                if (!findUserRoleByToken(Token).equals("OPERATOR")&&!findUserRoleByToken(Token).equals("ADMIN")) {
+                    saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"WARNING","권한 오류",jo.getString("MESSAGE_TYPE"));
+                    return;
+                }
                 System.out.println("토큰성공");
+                saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"COMMON","",jo.getString("MESSAGE_TYPE"));
                 orderOre(jo);
                 break;
             case "ORE_COUNTRY_REQUEST":
                 Token=jo.getString("TOKEN");
-                if (!validateToken(Token)) return;
+                if (!validateToken(Token)){ saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"WARNING","토큰 유효성 검사 오류",jo.getString("MESSAGE_TYPE"));
+                    return;}
+                if (!findUserRoleByToken(Token).equals("OPERATOR")&&!findUserRoleByToken(Token).equals("ADMIN")) {
+                    saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"WARNING","권한 오류",jo.getString("MESSAGE_TYPE"));
+                    return;
+                }
                 System.out.println("토큰성공");
+                saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"COMMON","",jo.getString("MESSAGE_TYPE"));
                 chooseCountryResponse(jo);
                 break;
             case "CONTROL_REQUEST":
                 Token=jo.getString("TOKEN");
-                if (!validateToken(Token)) return;
-                if (!findUserRoleByToken(Token).equals("ADMIN")) return;
+                if (!validateToken(Token)) {
+                    saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"WARNING","토큰 유효성 검사 오류",jo.getString("MESSAGE_TYPE"));
+                    return;
+                }
+                if (!findUserRoleByToken(Token).equals("OPERATOR")&&!findUserRoleByToken(Token).equals("ADMIN")) {
+                    saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"WARNING","권한 오류",jo.getString("MESSAGE_TYPE"));
+                    return;
+                }
+                saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"COMMON","",jo.getString("MESSAGE_TYPE"));
+
                 System.out.println("토큰성공");
                 controlMachine(jo);
                 //sendOrderToMachine(jo.getString("TARGET"),jo.getString("ORDER"));
                 break;
             case "MANAGE_USER_REQUEST":
+                Token=jo.getString("TOKEN");
+                if (!validateToken(Token)) {
+                    saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"WARNING","토큰 유효성 검사 오류",jo.getString("MESSAGE_TYPE"));
+                    return;
+                }
+                if (!findUserRoleByToken(Token).equals("OPERATOR")&&!findUserRoleByToken(Token).equals("ADMIN")) {
+                    saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"WARNING","권한 오류",jo.getString("MESSAGE_TYPE"));
+                    return;
+                }
+                saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"COMMON","",jo.getString("MESSAGE_TYPE"));
+                manageUser(jo);
                 break;
             case "MANAGE_MACHINE_REQUEST":
+                Token=jo.getString("TOKEN");
+                if (!validateToken(Token)) {
+                    saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"WARNING","토큰 유효성 검사 오류",jo.getString("MESSAGE_TYPE"));
+                    return;
+                }
+                if (!findUserRoleByToken(Token).equals("OPERATOR")&&!findUserRoleByToken(Token).equals("ADMIN")) {
+                    saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"WARNING","권한 오류",jo.getString("MESSAGE_TYPE"));
+                    return;
+                }
+                saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"COMMON","",jo.getString("MESSAGE_TYPE"));
+                manageMachine(jo);
                 break;
             case "ALIVE":
                 break;
@@ -481,6 +565,9 @@ public class Custom_Server extends Thread {
                 break;
         }
     }
+
+    void manageUser(JSONObject jo){}
+    void manageMachine(JSONObject jo){}
     void controlMachine(JSONObject jo) throws Exception {
         String sql= "UPDATE MACHINE SET POWER= '"+jo.getString("POWER")+"'" +
                 ", VALUE=" +jo.getInt("VALUE")+
@@ -573,12 +660,16 @@ public class Custom_Server extends Thread {
                     break;
             }
         }
-
         for(Custom_Server c : clients){
-            if(c.name.equals(target)) c.send(order_data.toString());
+            if(c.type.equals("ACTUATOR")&&c.name.equals(target)) c.send(order_data.toString());
         }
     }
-
+    static void userConnectDataReset() throws SQLException {
+        System.out.println("접속자 정보 초기화");
+        String sql="UPDATE USER SET CONNECT_STATUS='DISCONNECT',ACCESSFORM='-'";
+        Statement stmts=con.createStatement();
+        stmts.executeUpdate(sql);
+    }
     public static void main(String[] args) {
         // TODO Auto-generated method stub
         int socket = 8000;
@@ -586,6 +677,7 @@ public class Custom_Server extends Thread {
             ServerSocket ss = new ServerSocket(socket);
             System.out.println("서버 열림");
             DBcon();
+            userConnectDataReset();
 //            Statement stm = con.createStatement();;
 //            ResultSet rss;
 //            String sql;
