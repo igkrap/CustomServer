@@ -75,20 +75,38 @@ public class Custom_Server extends Thread {
                     }
                 }
             }
-            } catch (UnsupportedEncodingException unsupportedEncodingException) {
-            unsupportedEncodingException.printStackTrace();
-        }
-     catch (IOException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
+            }
+     catch (Exception e) {
             System.out.println(this.name+"소켓연결이 끊겼습니다.");
-        } catch (Exception e) {
             // TODO Auto-generated catch block
             try {
                 e.printStackTrace();
                 socket.close();
-            } catch (IOException ioException) {
-                ioException.printStackTrace();
+                clients.remove(this);
+                System.out.println("남은 숫자:"+clients.size());
+                JSONObject jsonObject=new JSONObject();
+                jsonObject.put("SENDER_TYPE", "SERVER");
+                jsonObject.put("MESSAGE_TYPE", "FORM_DATA");
+                jsonObject.put("FORM_TYPE","MANAGE");
+                if(this.type.equals("ACTUATOR")||this.type.equals("SENSOR")) {
+                    String sql="UPDATE MACHINE SET CONNECT_STATUS='DISCONNECT' WHERE NAME='"+this.name+"'";
+                    stmt.executeUpdate(sql);
+                    jsonObject.put("DATA_TYPE", "MACHINE");
+                    jsonObject.put("CONNECT_STATUS",findMachineStatusByName(this.name));
+                }
+                else if(this.type.equals("USER")){
+                    String sql="UPDATE USER SET CONNECT_STATUS='DISCONNECT',ACCESSFORM='' WHERE USERNAME='"+this.name+"'";
+                    stmt.executeUpdate(sql);
+                    jsonObject.put("DATA_TYPE","USER");
+                    jsonObject.put("CONNECT_STATUS",findUserStatusByName(this.name));
+                }
+                jsonObject.put("NAME",this.name);
+
+                System.out.println("MANAGE 접속중인 유저에게 :"+jsonObject.toString());
+                sendToUser(jsonObject);
+            } catch (Exception e2) {
+
+                e2.printStackTrace();
             }
 
         }
@@ -166,21 +184,79 @@ public class Custom_Server extends Thread {
             }
         }
     }
-    void init(JSONObject jo) throws SQLException {
+    String findMachineStatusByName(String name) throws SQLException {
+        String sql="SELECT CONNECT_STATUS FROM MACHINE WHERE NAME='"+name+"'";
+        rs=stmt.executeQuery(sql);
+        String result="";
+        while(rs.next()) {
+            result=rs.getString(1);
+        }
+        return result;
+    }
+    String findMachineMacByName(String name) throws SQLException {
+        String sql="SELECT MAC_ADDRESS FROM MACHINE WHERE NAME='"+name+"'";
+        rs=stmt.executeQuery(sql);
+        String result="";
+        while(rs.next()) {
+            result=rs.getString(1);
+        }
+        return result;
+    }
+    String findUserStatusByName(String name) throws SQLException {
+        String sql="SELECT CONNECT_STATUS FROM USER WHERE USERNAME='"+name+"'";
+        rs=stmt.executeQuery(sql);
+        String result="";
+        while(rs.next()) {
+            result=rs.getString(1);
+        }
+        return result;
+    }
+    void init(JSONObject jo) throws Exception {
         this.type=jo.getString("SENDER_TYPE");
         this.name=jo.getString("NAME");
+        JSONObject response=new JSONObject();
+        response.put("SENDER_TYPE", "SERVER");
+        response.put("MESSAGE_TYPE", "INIT_OK");
+        send(response.toString());
         if(this.type.equals("ACTUATOR")||this.type.equals("SENSOR"))
         {
+            if(jo.getString("MAC_ADDRESS").equals(findMachineMacByName(this.name))){
+                String sql="UPDATE MACHINE SET CONNECT_STATUS='CONNECT' WHERE NAME='"+this.name+"'";
+                stmt.executeUpdate(sql);
+                JSONObject jsonObject=new JSONObject();
+                jsonObject.put("SENDER_TYPE", "SERVER");
+                jsonObject.put("MESSAGE_TYPE", "FORM_DATA");
+                jsonObject.put("FORM_TYPE","MANAGE");
+                jsonObject.put("DATA_TYPE", "MACHINE");
+                jsonObject.put("NAME",this.name);
+                jsonObject.put("CONNECT_STATUS",findMachineStatusByName(this.name));
+                sendToUser(jsonObject);
+            }
+        }
+        else{
+            String sql="UPDATE USER SET CONNECT_STATUS='CONNECT' WHERE USERNAME='"+this.name+"'";
+            stmt.executeUpdate(sql);
+            JSONObject jsonObject=new JSONObject();
+            jsonObject.put("SENDER_TYPE", "SERVER");
+            jsonObject.put("MESSAGE_TYPE", "FORM_DATA");
+            jsonObject.put("FORM_TYPE","MANAGE");
+            jsonObject.put("DATA_TYPE", "USER");
+            jsonObject.put("NAME",this.name);
+            jsonObject.put("CONNECT_STATUS",findUserStatusByName(this.name));
+            sendToUser(jsonObject);
+        }
 //            String sql="SELECT * FROM MACHINE";
 //            stmt=con.createStatement();
 //            rs=stmt.executeQuery(sql);
 //            while(rs.next()){
 //                if SENDER_TYPErs.getString(4);
 //            }
-        }
-            System.out.println(this.name);
+        System.out.println(this.name);
+
     }
+
     void send(String data) throws Exception {
+        if(socket.isClosed()) return;
         System.out.println(this.name + "에게 :" + data);
         OutputStream out = socket.getOutputStream(); // 쓰기
         OutputStreamWriter osw1 = new OutputStreamWriter(out, "utf-8");
@@ -304,10 +380,58 @@ public class Custom_Server extends Thread {
                 }
                 send(response.toString());
                 break;
+            case "MANAGE":
+                JSONArray machineArray=new JSONArray();
+                JSONArray userArray=new JSONArray();
+                JSONArray logArray=new JSONArray();
 
+                sql="SELECT * FROM MACHINE";
+                rs=stmt.executeQuery(sql);
+                while(rs.next()){
+                    JSONObject jsonObject=new JSONObject();
+                    jsonObject.put("ID",rs.getString(1));
+                    jsonObject.put("TYPE",rs.getString(2));
+                    jsonObject.put("NAME",rs.getString(3));
+                    jsonObject.put("MAC_ADDRESS",rs.getString(4));
+                    jsonObject.put("IP",rs.getString(5));
+                    jsonObject.put("CONNECT_STATUS",rs.getString(6));
+                    machineArray.put(jsonObject);
+                }
+                sql="SELECT * FROM USER";
+                rs=stmt.executeQuery(sql);
+                while(rs.next()){
+                    JSONObject jsonObject=new JSONObject();
+                    jsonObject.put("ID",rs.getString(1));
+                    jsonObject.put("NAME",rs.getString(2));
+                    jsonObject.put("ROLE",rs.getString(5));
+                    jsonObject.put("CONNECT_STATUS",rs.getString(8));
+                    jsonObject.put("ACCOUNT_STATUS",rs.getString(9));
+                    userArray.put(jsonObject);
+                }
+//                sql="SELECT USERNAME,CONNECT_STATUS FROM USER";
+//                rs=stmt.executeQuery(sql);
+//                while(rs.next()){
+//                    JSONObject jsonObject=new JSONObject();
+//                    jsonObject.put("NAME",rs.getString(1));
+//                    jsonObject.put("CONNECT_STATUS",rs.getString(2));
+//                    userArray.put(jsonObject);
+//                }
+                response.put("MACHINE",machineArray);
+                response.put("USER",userArray);
+                //response.put("LOG",logArray);
+                send(response.toString());
             default:
                 break;
         }
+    }
+    String findUserRoleByToken(String token) throws SQLException {
+        String sql="SELECT ROLE FROM USER WHERE TOKEN='"+token+"'";
+        rs=stmt.executeQuery(sql);
+        String role = "";
+        while (rs.next()){
+            role=rs.getString(1);
+        }
+        return role;
     }
     void receiveUserRequest(JSONObject jo) throws Exception {
         String Token;
@@ -342,9 +466,14 @@ public class Custom_Server extends Thread {
             case "CONTROL_REQUEST":
                 Token=jo.getString("TOKEN");
                 if (!validateToken(Token)) return;
+                if (!findUserRoleByToken(Token).equals("ADMIN")) return;
                 System.out.println("토큰성공");
                 controlMachine(jo);
                 //sendOrderToMachine(jo.getString("TARGET"),jo.getString("ORDER"));
+                break;
+            case "MANAGE_USER_REQUEST":
+                break;
+            case "MANAGE_MACHINE_REQUEST":
                 break;
             case "ALIVE":
                 break;
@@ -376,7 +505,7 @@ public class Custom_Server extends Thread {
         sendToUser(response);
 
     }
-    void receiveActuatorData(JSONObject jo) throws SQLException {
+    void receiveActuatorData(JSONObject jo) throws Exception {
         switch(jo.getString("MESSAGE_TYPE")) {
             case "INIT":
                 init(jo);
@@ -400,7 +529,7 @@ public class Custom_Server extends Thread {
 
         };
     }
-    void receiveSensorData(JSONObject jo) throws SQLException {
+    void receiveSensorData(JSONObject jo) throws Exception {
         switch (jo.getString("MESSAGE_TYPE")){
             case "INIT":
                 init(jo);
@@ -478,7 +607,7 @@ public class Custom_Server extends Thread {
 
             while (true) {
                 Socket user = ss.accept();
-                System.out.println("클라이언트 입장 " + user.getLocalAddress() + " : " + user.getLocalPort());
+                System.out.println("클라이언트 입장 " + user.getRemoteSocketAddress() );
                 Thread serverThread = new Custom_Server(user);
                 serverThread.start();
             }
