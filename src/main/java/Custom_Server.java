@@ -1,9 +1,6 @@
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -123,8 +120,44 @@ public class Custom_Server extends Thread {
         jsonObject.put("DATA","["+c_type+"] "+this.name+" - "+ip+" "+log_lv+" "+log_information+" "+activity);
         sendToUser(jsonObject);
     }
-    public void searchLog(){
+    public void searchLog(JSONObject jo) throws Exception {
+        String sql="SELECT * FROM LOG WHERE 1=1";
 
+        JSONObject query= jo.getJSONObject("QUERY");
+        Iterator x = query.keys();
+        while (x.hasNext()){
+            String key = (String) x.next();
+            if(key.equals("TIMESTAMP1")){
+                sql+=" AND TIMESTAMP>='"+query.getString(key)+"'";
+            }
+            else if(key.equals("TIMESTAMP2")){
+                sql+=" AND TIMESTAMP<='"+query.getString(key)+"'";
+            }
+            else {
+                sql+=" AND "+key+"='"+query.getString(key)+"'";
+            }
+
+        }
+        System.out.println(sql);
+        JSONArray resultArray=new JSONArray();
+        rs=stmt.executeQuery(sql);
+        while(rs.next()){
+            JSONObject query_result=new JSONObject();
+            query_result.put("ACCESS_IP",rs.getString(2));
+            query_result.put("CLIENT_TYPE",rs.getString(3));
+            query_result.put("LOG_LEVEL",rs.getString(4));
+            query_result.put("INFORMATION",rs.getString(5));
+            query_result.put("ACTIVITY",rs.getString(6));
+            query_result.put("TIMESTAMP",rs.getString(7));
+            resultArray.put(query_result);
+        }
+        JSONObject response=new JSONObject();
+        response.put("SENDER_TYPE", "SERVER");
+        response.put("MESSAGE_TYPE", "FORM_DATA");
+        response.put("FORM_TYPE","SEARCH");
+        response.put("DATA_TYPE","LOG");
+        response.put("DATA",resultArray);
+        send(response.toString());
     }
     public static String createToken(String username) throws Exception, Exception
     {
@@ -469,6 +502,7 @@ public class Custom_Server extends Thread {
         }
         return role;
     }
+
     void receiveUserRequest(JSONObject jo) throws Exception {
         String Token;
 
@@ -484,6 +518,7 @@ public class Custom_Server extends Thread {
                 break;
             case "LOGIN_REQUEST":
                 login(jo);
+
                 break;
             case "ENTER_FORM_REQUEST":
                 Token=jo.getString("TOKEN");
@@ -559,6 +594,19 @@ public class Custom_Server extends Thread {
                 saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"COMMON","",jo.getString("MESSAGE_TYPE"));
                 manageMachine(jo);
                 break;
+            case "SEARCH_LOG_REQUEST":
+                Token=jo.getString("TOKEN");
+                if (!validateToken(Token)) {
+                    saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"WARNING","토큰 유효성 검사 오류",jo.getString("MESSAGE_TYPE"));
+                    return;
+                }
+                if (!findUserRoleByToken(Token).equals("OPERATOR")&&!findUserRoleByToken(Token).equals("ADMIN")) {
+                    saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"WARNING","권한 오류",jo.getString("MESSAGE_TYPE"));
+                    return;
+                }
+                saveLog(jo.getString("IP"),jo.getString("SENDER_TYPE"),"COMMON","",jo.getString("MESSAGE_TYPE"));
+                searchLog(jo);
+                break;
             case "ALIVE":
                 break;
             default :
@@ -603,9 +651,18 @@ public class Custom_Server extends Thread {
                 break;
         }
     }
+
     void handleMeasureData(JSONObject jo) {
         switch (this.name){
             case "TMP_SENSOR":
+//                JSONObject jsonObject=new JSONObject();
+//                jsonObject.put("SENDER_TYPE", "SERVER");
+//                jsonObject.put("MESSAGE_TYPE", "FORM_DATA");
+//                jsonObject.put("FORM_TYPE","DASHBOARD");
+//                jsonObject.put("DATA_TYPE", "TMP");
+//                jsonObject.put("TMP","");
+//                sendToUser(jsonObject);
+
                 break;
             case "CHECK":
                 break;
@@ -676,6 +733,7 @@ public class Custom_Server extends Thread {
         try {
             ServerSocket ss = new ServerSocket(socket);
             System.out.println("서버 열림");
+
             DBcon();
             userConnectDataReset();
 //            Statement stm = con.createStatement();;
