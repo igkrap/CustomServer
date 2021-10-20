@@ -1,6 +1,7 @@
 package secomdalcom;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.text.SimpleDateFormat;
 import java.util.*;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -11,7 +12,7 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.io.UnsupportedEncodingException;
-
+import java.io.*;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.sql.Connection;
@@ -634,8 +635,8 @@ public class Custom_Server extends Thread {
                 sql = "SELECT * FROM ORE_PROCESSED";
                 rs=stmt.executeQuery(sql);
                 while(rs.next()){
-                    processed_amount=rs.getInt(2)+rs.getInt(3);
-                    jsonObject.put(rs.getString(1)+"_TOTAL",processed_amount);
+                    processed_amount=rs.getInt(3)+rs.getInt(4);
+                    jsonObject.put(rs.getString(2)+"_TOTAL",processed_amount);
                 }
                 sendToUser(jsonObject);
                 //정상품 불량품 db 반영, dashboard 변화 주기
@@ -714,6 +715,7 @@ public class Custom_Server extends Thread {
             dbAccessor=new DBAccessor();
             if(SecurityMode) securityModule=new SDSecurity(dbAccessor);
             dbAccessor.userConnectDataReset();
+            dbAccessor.logDataReset();
             while (true) {
                 Socket user = ss.accept();
                 Thread serverThread = new Custom_Server(user);
@@ -771,6 +773,13 @@ class DBAccessor{
         }
         Custom_Server.sendToUser(jsonObject);
         System.out.println(StringColor.ANSI_GREEN+"완료"+StringColor.ANSI_RESET);
+    }
+    static void logDataReset() throws SQLException {
+        {
+            String sql = "TRUNCATE TABLE LOG";
+            Statement stmts = con.createStatement();
+            stmts.executeUpdate(sql);
+        }
     }
     static void userConnectDataReset() throws SQLException {
         System.out.println(StringColor.ANSI_GREEN+"접속자 정보 초기화"+StringColor.ANSI_RESET);
@@ -850,7 +859,10 @@ class SDSecurity implements SecurityModule{
         System.out.println(StringColor.ANSI_GREEN_BACKGROUND+"로그 저장 기능 추가...   완료"+StringColor.ANSI_RESET);
         System.out.println(StringColor.ANSI_GREEN_BACKGROUND+"통신 암호화...   완료"+StringColor.ANSI_RESET);
         System.out.println(StringColor.ANSI_GREEN_BACKGROUND+"인젝션 방지 기능 추가...   완료"+StringColor.ANSI_RESET);
-
+        System.out.print(StringColor.ANSI_GREEN_BACKGROUND+"시스템 로그 모니터링 기능 추가...   ");
+        new AuthTail(this.dbAccessor).start();
+        new Fail2BanTail(this.dbAccessor).start();
+        System.out.println("완료"+StringColor.ANSI_RESET);
     }
 
     @Override
@@ -1085,5 +1097,141 @@ class StringColor {
     public static final String ANSI_PURPLE_BACKGROUND = "\u001B[45m";
     public static final String ANSI_CYAN_BACKGROUND = "\u001B[46m";
     public static final String ANSI_WHITE_BACKGROUND = "\u001B[47m";
+
+}
+
+
+class AuthTail extends Thread {
+    private File targetFile;
+    private String fileName;
+    private BufferedReader reader;
+    private String[] buffer = new String[5];
+    private long updateTime;
+    DBAccessor dbAccessor;
+    public AuthTail(DBAccessor dbAccessor) {
+        this.dbAccessor=dbAccessor;
+        fileName = "/var/log/auth.log";
+    }
+
+    public void read() {
+        try {
+            System.out.println("read");
+            File file = new File(fileName);
+            updateTime = file.lastModified();
+            reader = new BufferedReader(new InputStreamReader(new FileInputStream(fileName)));
+            String line = "";
+            String[] word=new String[20];
+            Date currentTime = new Date ();
+            int count = 0;
+            while(true) {
+                line = reader.readLine();
+
+                if(line == null) {
+                    Thread.sleep(10);
+                    continue;
+                }
+                if(line.contains("Failed password")) {
+                    word = line.split(" ");
+                    SimpleDateFormat SimpleDateFormat = new SimpleDateFormat("MMM dd HH:mm:ss");
+                    SimpleDateFormat f = new SimpleDateFormat("MM-dd HH:mm:ss");
+                    Date d1 = SimpleDateFormat.parse(word[0] + " " + word[1] + " " + word[2]);
+                    Date d2 = f.parse(f.format(currentTime));
+                    if (d1.compareTo(d2) >= 0) {
+                        line = line.replaceAll("\\s+", " ");
+                        //System.out.println(line);
+                        word = line.split(" ");
+
+                        String ip = word[10];
+                        //System.out.println(command);
+                        //System.out.println(ip);
+                        dbAccessor.saveLog(ip, "SYSTEM", "-", "WARNING", "SSH 로그인 실패", "SSH");
+                        //System.out.println(line);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            try {
+                if(reader != null) {reader.close();}
+            } catch(Exception e1) {
+                e1.printStackTrace();
+            }
+        }
+    }
+    public void run() {
+        read();
+    }
+
+
+}
+class Fail2BanTail extends Thread {
+    private File targetFile;
+    private String fileName;
+    private BufferedReader reader;
+    private String[] buffer = new String[5];
+    private long updateTime;
+    DBAccessor dbAccessor;
+    public Fail2BanTail() { }
+    public Fail2BanTail(DBAccessor dbAccessor) {
+        this.dbAccessor=dbAccessor;
+        fileName = "/var/log/fail2ban.log";
+    }
+
+    public void read() {
+        try {
+            System.out.println("read");
+            File file = new File(fileName);
+            updateTime = file.lastModified();
+            reader = new BufferedReader(new InputStreamReader(new FileInputStream(fileName)));
+            String line = "";
+            String[] word=new String[20];
+            Date currentTime = new Date ();
+            int count = 0;
+            while(true) {
+                line = reader.readLine();
+
+                if(line == null) {
+                    Thread.sleep(10);
+                    continue;
+                }
+                word=line.split(",");
+                SimpleDateFormat SimpleDateFormat  = new SimpleDateFormat ( "yyyy-MM-dd HH:mm:ss");
+                SimpleDateFormat f = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+                Date d1 = f.parse(word[0]);
+                Date d2 = f.parse(SimpleDateFormat.format(currentTime));
+                if(d1.compareTo(d2) >= 0) {
+                    line=line.replaceAll("\\s+"," ");
+                    //System.out.println(line);
+                    word=line.split(" ");
+                    String command=word[6];
+                    String ip=word[7];
+                    //System.out.println(command);
+                    //System.out.println(ip);
+                    switch(command){
+                        case "Ban":
+                            dbAccessor.saveLog(ip,"SYSTEM","-","ERROR","비정상적 접근으로 인하여 해당 IP 밴","SSH");
+                            break;
+                        default:
+                            break;
+                    }
+                    //System.out.println(line);
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            try {
+                if(reader != null) {reader.close();}
+            } catch(Exception e1) {
+                e1.printStackTrace();
+            }
+        }
+    }
+
+    public void run() {
+        read();
+    }
+
 
 }
