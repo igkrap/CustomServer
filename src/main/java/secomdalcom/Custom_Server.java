@@ -1,23 +1,20 @@
 package secomdalcom;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketAddress;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.io.BufferedReader;
-import java.io.BufferedWriter;
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
-import java.io.UnsupportedEncodingException;
 import java.io.*;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.sql.Connection;
 import java.sql.DriverManager;
-import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -26,8 +23,6 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import java.util.Base64;
-import java.util.Base64.Decoder;
-import java.util.Base64.Encoder;
 
 public class Custom_Server extends Thread {
     static ArrayList<Custom_Server> clients = new ArrayList<Custom_Server>();
@@ -54,10 +49,7 @@ public class Custom_Server extends Thread {
                 BufferedReader reader = new BufferedReader(new InputStreamReader(input, "UTF-8"));
 
                 if ((rawdata = reader.readLine()) != null) {
-                    System.out.println(rawdata);
-                    System.out.println(StringColor.ANSI_GREEN+"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"+StringColor.ANSI_RESET);
-                    System.out.println(StringColor.ANSI_WHITE+"메시지 감지"+StringColor.ANSI_RESET);
-                    //System.out.println("받은 메시지:"+data);
+                    //System.out.println(rawdata);
 //                    for (Custom_Server c: clients) {
 //                        c.send(s);
 //                    }
@@ -91,20 +83,59 @@ public class Custom_Server extends Thread {
                         if (!data.getString("MESSAGE_TYPE").equals("ALIVE")) {
                             dbAccessor.saveLog(this.IP, this.name, data.getString("SENDER_TYPE"), "COMMON", "", data.getString("MESSAGE_TYPE"));
                         }
-                        System.out.println(StringColor.ANSI_GREEN + "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" + StringColor.ANSI_RESET);
                     }
                     }
             }
             }
+        catch (SDSecurity.SDSecurityException|UnsupportedEncodingException|IllegalArgumentException se){
+            clients.remove(this);
+            Statement stmt= null;
+            try {
+                stmt=dbAccessor.con.createStatement();
+            } catch (SQLException throwables) {
+            }
+            String sql="INSERT IGNORE INTO BAN_LIST (IP,INFO) VALUES ('"+this.IP+"','이상 데이터 감지')";
+            try {
+                stmt.executeUpdate(sql);
+            } catch (SQLException throwables) {
+            }
+            sql="SELECT TIMESTAMP FROM BAN_LIST WHERE IP='"+this.IP+"'";
+            JSONObject jsonObject=new JSONObject();
+            jsonObject.put("SENDER_TYPE", "SERVER");
+            jsonObject.put("MESSAGE_TYPE", "FORM_DATA");
+            jsonObject.put("FORM_TYPE","MANAGE");
+            jsonObject.put("DATA_TYPE","BAN");
+            jsonObject.put("IP",this.IP);
+            jsonObject.put("INFO","이상 데이터 감지");
+            try {
+                dbAccessor.saveLog(this.IP,"","","WARNING","이상 데이터 감지","");
+            } catch (SQLException throwables) {
+                //throwables.printStackTrace();
+            } catch (IOException e) {
+                //e.printStackTrace();
+            }
+            try {
+                ResultSet rs=stmt.executeQuery(sql);
+
+                while(rs.next()){
+                    jsonObject.put("TIMESTAMP",rs.getString(1));
+                }
+            } catch (SQLException throwables) {
+
+            }
+            try {
+                sendToUser(jsonObject);
+            } catch (SQLException throwables) {
+            } catch (IOException e) {
+            }
+        }
      catch (Exception e) {
-            System.out.println(StringColor.ANSI_YELLOW+this.name+"의 접속이 종료되었습니다."+StringColor.ANSI_RESET);
+            e.printStackTrace();
             // TODO Auto-generated catch block
             try {
-                e.printStackTrace();
                 socket.close();
                 clients.remove(this);
                 Statement stmt=dbAccessor.con.createStatement();
-                System.out.println(StringColor.ANSI_YELLOW+"남은 클라이언트 숫자:"+clients.size()+StringColor.ANSI_RESET);
                 JSONObject jsonObject=new JSONObject();
                 jsonObject.put("SENDER_TYPE", "SERVER");
                 jsonObject.put("MESSAGE_TYPE", "FORM_DATA");
@@ -134,7 +165,6 @@ public class Custom_Server extends Thread {
 
             } catch (Exception e2) {
 
-                e2.printStackTrace();
             }
 
         }
@@ -142,11 +172,9 @@ public class Custom_Server extends Thread {
 
     public void searchLog(JSONObject jo) throws Exception {
 
-        System.out.print("["+this.IP+"] 유저명 : "+this.name+"    "+jo.getString("FORM_TYPE")+"에서 로그 조회 요청");
         String sql="SELECT * FROM LOG WHERE 1=1";
 
         JSONObject query= jo.getJSONObject("QUERY");
-        System.out.println(query.toString());
         Iterator x = query.keys();
         while (x.hasNext()){
             String key = (String) x.next();
@@ -161,7 +189,6 @@ public class Custom_Server extends Thread {
                 sql+=" AND "+key+"='"+query.getString(key)+"'";
             }
         }
-        System.out.println("생성된 쿼리: "+sql);
         Statement stmt=dbAccessor.con.createStatement();
         JSONArray resultArray=new JSONArray();
         ResultSet rs=stmt.executeQuery(sql);
@@ -185,7 +212,7 @@ public class Custom_Server extends Thread {
     }
 
 
-    public static void sendToUser(JSONObject jo) throws Exception {
+    public static void sendToUser(JSONObject jo) throws SQLException, IOException {
         for (Custom_Server c :clients){
             if(c.type.equals("USER")) {
                 if(jo.getString("FORM_TYPE").equals(dbAccessor.findUserLocationById(c.name))){
@@ -197,7 +224,6 @@ public class Custom_Server extends Thread {
 
     void init(JSONObject jo) throws Exception {
         clients.add(this);
-        System.out.print(StringColor.ANSI_WHITE+"["+this.IP+"]"+StringColor.ANSI_RESET);
         this.type=jo.getString("SENDER_TYPE");
         this.name=jo.getString("NAME");
         JSONObject response=new JSONObject();
@@ -206,8 +232,6 @@ public class Custom_Server extends Thread {
 
         if(this.type.equals("ACTUATOR")||this.type.equals("SENSOR")||this.type.equals("COMPOUND"))
         {
-            System.out.print("(기기명 : "+this.name+")\t");
-            System.out.println(StringColor.ANSI_GREEN+"접속승인"+StringColor.ANSI_RESET );
 
                 String sql="UPDATE MACHINE SET CONNECT_STATUS='CONNECT' WHERE NAME='"+this.name+"'";
                 Statement stmt= dbAccessor.con.createStatement();
@@ -232,9 +256,6 @@ public class Custom_Server extends Thread {
         else{
             response.put("ROLE", dbAccessor.findUserRoleByToken(jo.getString("TOKEN")));
 
-            System.out.print("(유저명 : "+this.name+")\t");
-            System.out.print(StringColor.ANSI_GREEN+"접속승인"+StringColor.ANSI_RESET );
-
             String sql="UPDATE USER SET CONNECT_STATUS='CONNECT' WHERE USERNAME='"+this.name+"'";
             Statement stmt= dbAccessor.con.createStatement();
 
@@ -249,7 +270,6 @@ public class Custom_Server extends Thread {
             send(response.toString());
             sendToUser(jsonObject);
         }
-        System.out.println(StringColor.ANSI_WHITE+"<접속자 수:"+clients.size()+">"+StringColor.ANSI_RESET);
 //            String sql="SELECT * FROM MACHINE";
 //            stmt=con.createStatement();
 //            rs=stmt.executeQuery(sql);
@@ -260,7 +280,7 @@ public class Custom_Server extends Thread {
 
     }
 
-    void send(String data) throws Exception {
+    void send(String data) throws IOException,UnsupportedEncodingException {
         if(socket.isClosed()) return;
         if(SecurityMode) data=securityModule.encryptData(data);
         OutputStream out = socket.getOutputStream(); // 쓰기
@@ -269,7 +289,6 @@ public class Custom_Server extends Thread {
         writer.println(data);
     }
     void orderOre(JSONObject jo) throws Exception {
-        System.out.print("["+this.IP+"] 유저명 : "+this.name+"    "+jo.getString("FORM_TYPE")+"에서 원자재 주문");
         String amount=jo.getString("COAL");
         String sql= "UPDATE ORE SET AMOUNT = AMOUNT+"+amount+" WHERE ID ="+2;
         Statement stmt=dbAccessor.con.createStatement();
@@ -284,7 +303,6 @@ public class Custom_Server extends Thread {
     void chooseCountryResponse(JSONObject jo) throws Exception {
         String country=jo.getString("COUNTRY");
 
-        System.out.print("["+this.IP+"] 유저명 : "+this.name+"    "+jo.getString("FORM_TYPE")+"에서 "+country+" 원자재 데이터 요청");
         String sql="SELECT * FROM ORE_PRICE_TREND WHERE COUNTRY='"+country+"'";
         Statement stmt = dbAccessor.con.createStatement();
         ResultSet rs=stmt.executeQuery(sql);
@@ -336,7 +354,6 @@ public class Custom_Server extends Thread {
         response.put("MESSAGE_TYPE", "LOGIN_RESPONSE");
         if (COUNT>=1)
         {
-            System.out.println("성공");
             String token=securityModule.createToken(id);
             sql="UPDATE USER SET TOKEN ='"+token+"' WHERE USERNAME ='"+id+"'";
             stmt.executeUpdate(sql);
@@ -345,7 +362,6 @@ public class Custom_Server extends Thread {
             send(response.toString());
         }
         else {
-            System.out.println("실패");
             response.put("RESPONSE_CODE", 2);
             send(response.toString());
             socket.close();
@@ -353,7 +369,6 @@ public class Custom_Server extends Thread {
     }
     void enter(JSONObject jo) throws Exception {
         String AccessForm=jo.getString("FORM_TYPE");
-        System.out.println("["+this.IP+"] 유저명 : "+this.name+"    "+AccessForm+" 폼에 접근");
         String sql="UPDATE USER SET ACCESSFORM='"+AccessForm+"' WHERE USERNAME ='"+this.name+"'";
         Statement stmt=dbAccessor.con.createStatement();
         stmt.executeUpdate(sql);
@@ -365,10 +380,11 @@ public class Custom_Server extends Thread {
         response.put("DATA_TYPE","INITIALIZATION");
         switch (AccessForm){
             case "DASHBOARD":
-                sql="SELECT RATE FROM PROCESS";
+                sql="SELECT PROCESS_NAME,RATE FROM PROCESS";
                 rs=stmt.executeQuery(sql);
                 while(rs.next()){
-                    response.put("PROCESS_RATE",rs.getInt(1));
+                    response.put(rs.getString(1),rs.getInt(2));
+
                 }
                 sql="SELECT * FROM ORE";
                 rs=stmt.executeQuery(sql);
@@ -393,10 +409,15 @@ public class Custom_Server extends Thread {
                     JSONObject jsonObject=new JSONObject();
                     jsonObject.put("NAME",rs.getString(3));
                     jsonObject.put("CONNECT_STATUS",rs.getString(6));
-                    if(rs.getString(2).equals("SENSOR")||rs.getString(2).equals("ACTUATOR")){
+                    if(rs.getString(3).equals("HEATER")){
+                        jsonObject.put("POWER",rs.getString(7));
+                    jsonObject.put("VALUE",rs.getString(9));
+                    }
+                    else if(rs.getString(2).equals("SENSOR")||rs.getString(2).equals("ACTUATOR")){
                         if(rs.getString(2).equals("ACTUATOR")) {jsonObject.put("POWER",rs.getString(7));}
                         jsonObject.put("VALUE",rs.getString(8));
                     }
+
                     machinesArray.put(jsonObject);
                 }
                 response.put("MACHINE",machinesArray);
@@ -507,12 +528,11 @@ public class Custom_Server extends Thread {
     void manageUser(JSONObject jo){}
     void manageMachine(JSONObject jo){}
     void controlMachine(JSONObject jo) throws Exception {
-        System.out.println("["+this.IP+"] 유저명 : "+this.name+"    "+jo.getString("FORM_TYPE")+"에서 기기제어 요청");
+
         Statement stmt=dbAccessor.con.createStatement();
         String sql= "UPDATE MACHINE SET POWER= '"+jo.getString("POWER")+"'" +
                 ", VALUE=" +jo.getInt("VALUE")+
                 " WHERE NAME='"+jo.getString("TARGET")+"'";
-
         stmt.executeUpdate(sql);
         sql="SELECT * FROM MACHINE WHERE NAME='"+jo.getString("TARGET")+"'";
         ResultSet rs=stmt.executeQuery(sql);
@@ -607,8 +627,16 @@ public class Custom_Server extends Thread {
                 jsonObject.put(jo.getString("MATERIAL_NAME"),amount);
                 jsonObject.put("USED_"+jo.getString("MATERIAL_NAME"),used_amount);
                 jsonObject.put("PROCESS_RATE",jo.getInt("STACK")*20);
-                sql = "UPDATE PROCESS SET RATE="+jo.getInt("STACK")*20;
+                sql = "UPDATE PROCESS SET RATE="+jo.getInt("STACK")*20+" WHERE PROCESS_NAME='BLAST'";
                 stmt.executeUpdate(sql);
+                if(jo.getInt("STACK")==1){
+                    sql = "UPDATE PROCESS SET RATE=2 WHERE PROCESS_NAME='STEP'";
+                    stmt.executeUpdate(sql);
+                }
+                else if(jo.getInt("STACK")==5){
+                    sql = "UPDATE PROCESS SET RATE=3 WHERE PROCESS_NAME='STEP'";
+                    stmt.executeUpdate(sql);
+                }
                 sendToUser(jsonObject);
                 jsonObject=new JSONObject();
                 jsonObject.put("SENDER_TYPE", "SERVER");
@@ -618,10 +646,16 @@ public class Custom_Server extends Thread {
                 sendToUser(jsonObject);
                 break;
             case "SPLIT":
+                sql = "UPDATE PROCESS SET RATE=0 WHERE PROCESS_NAME='BLAST'";
+                stmt.executeUpdate(sql);
                 sql = "UPDATE ORE_PROCESSED SET "+jo.getString("RESULT")+"="+jo.getString("RESULT")+"+1";
                 stmt.executeUpdate(sql);
                 sql = "SELECT TERM,"+jo.getString("RESULT")+" FROM ORE_PROCESSED";
                 rs=stmt.executeQuery(sql);
+
+                sql = "UPDATE PROCESS SET RATE=4 WHERE PROCESS_NAME='STEP'";
+                stmt.executeUpdate(sql);
+
                 jsonObject=new JSONObject();
                 jsonObject.put("SENDER_TYPE", "SERVER");
                 jsonObject.put("MESSAGE_TYPE", "FORM_DATA");
@@ -630,18 +664,25 @@ public class Custom_Server extends Thread {
                 int processed_amount=0;
                 while(rs.next()){
                     processed_amount=rs.getInt(2);
-                    jsonObject.put(rs.getString(1)+"_"+jo.getString("RESULT"),processed_amount);
-                }
-                sql = "SELECT * FROM ORE_PROCESSED";
-                rs=stmt.executeQuery(sql);
-                while(rs.next()){
-                    processed_amount=rs.getInt(3)+rs.getInt(4);
-                    jsonObject.put(rs.getString(2)+"_TOTAL",processed_amount);
+                    jsonObject.put(jo.getString("RESULT"),processed_amount);
                 }
                 sendToUser(jsonObject);
                 //정상품 불량품 db 반영, dashboard 변화 주기
                 break;
+            case "HEATER":
+                sql = "UPDATE MACHINE SET VALUE2="+jo.getString("TEMP")+"+1500 WHERE NAME='HEATER'";
+                stmt.executeUpdate(sql);
+                jsonObject=new JSONObject();
+                jsonObject.put("SENDER_TYPE", "SERVER");
+                jsonObject.put("MESSAGE_TYPE", "FORM_DATA");
+                jsonObject.put("FORM_TYPE","DASHBOARD");
+                jsonObject.put("DATA_TYPE", "TEMP");
+                jsonObject.put("VALUE",(int)Double.parseDouble(jo.getString("TEMP"))+1500);
+
+                sendToUser(jsonObject);
+                break;
         }
+
 
     }
     void receiveCompoundData(JSONObject jo) throws Exception{
@@ -672,10 +713,7 @@ public class Custom_Server extends Thread {
         order_data.put("SENDER_TYPE","SERVER");
         order_data.put("MESSAGE_TYPE","STATUS");
         order_data.put("POWER",power);
-        if (target.equals("HEATER")){
-            order_data.put("VALUE",value);
-        }
-        else{
+
             switch (value) {
                 case 0:
                     order_data.put("VALUE", "ZERO");
@@ -687,7 +725,7 @@ public class Custom_Server extends Thread {
                     order_data.put("VALUE", "TWO");
                     break;
             }
-        }
+
         for(Custom_Server c : clients){
             if(c.type.equals("ACTUATOR")&&c.name.equals(target)) c.send(order_data.toString());
         }
@@ -718,22 +756,29 @@ public class Custom_Server extends Thread {
             dbAccessor.logDataReset();
             while (true) {
                 Socket user = ss.accept();
-                Thread serverThread = new Custom_Server(user);
-                serverThread.start();
+                if(SecurityMode){
+                if(!securityModule.checkBanUser(user.getInetAddress().getHostAddress())) {
+                    Thread serverThread = new Custom_Server(user);
+                    serverThread.start();
+                }
+                }
+                else{
+                    Thread serverThread = new Custom_Server(user);
+                    serverThread.start();
+                }
             }
         } catch (Exception e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
         }
     }
 }
 interface SecurityModule {
     public void login_s(Custom_Server s,JSONObject jo) throws Exception;
-    public boolean validateToken(String jwt) throws Exception;
-    public String createToken(String username) throws Exception;
-    public JSONObject executeSecurityProcess(Custom_Server c,String src) throws Exception;
-    public String encryptData(String src) throws Exception;
-    public String decryptData(String src) throws Exception;
+    public boolean validateToken(String jwt) ;
+    public String createToken(String username) ;
+    public JSONObject executeSecurityProcess(Custom_Server c,String src) throws IOException, SDSecurity.SDSecurityException, SQLException;
+    public String encryptData(String src) throws UnsupportedEncodingException;
+    public String decryptData(String src) throws UnsupportedEncodingException;
+    public boolean checkBanUser(String remoteSocketAddress) throws SQLException;
 }
 class DBAccessor{
     static String driver = "org.mariadb.jdbc.Driver";
@@ -746,18 +791,17 @@ class DBAccessor{
                 "root");
 
         if( con != null ) {
-            System.out.println(StringColor.ANSI_GREEN+"DB 접속 성공"+StringColor.ANSI_RESET);
+            System.out.println("DB 접속 성공");
         }
 
     } catch (ClassNotFoundException e) {
         System.out.println(StringColor.ANSI_RED+"드라이버 로드 실패"+StringColor.ANSI_RESET);
     } catch (SQLException e) {
         System.out.println(StringColor.ANSI_RED+"DB 접속 실패"+StringColor.ANSI_RESET);
-        e.printStackTrace();
+
     }
     }
-    public void saveLog(String ip,String name,String c_type,String log_lv,String log_information,String activity) throws Exception {
-        System.out.print(StringColor.ANSI_YELLOW+"처리내역 로그 저장...\t"+StringColor.ANSI_RESET);
+    public void saveLog(String ip,String name,String c_type,String log_lv,String log_information,String activity) throws SQLException, IOException {
         String sql="INSERT INTO LOG (ACCESS_IP,CLIENT_TYPE,LOG_LEVEL,INFORMATION,ACTIVITY) VALUES ('"+ip+"','"+c_type+"','"+log_lv+"','"+log_information+"','"+activity+"')";
         Statement stmt= con.createStatement();
         stmt.executeUpdate(sql);
@@ -769,10 +813,16 @@ class DBAccessor{
         sql="SELECT * FROM LOG ORDER BY IDX DESC LIMIT 1";
         ResultSet rs=stmt.executeQuery(sql);
         while(rs.next()){
+            String color="";
+            switch (log_lv){
+                case "COMMON": color=StringColor.ANSI_GREEN;break;
+                case "WARNING": color=StringColor.ANSI_YELLOW;break;
+                case "ERROR": color=StringColor.ANSI_RED;break;
+            }
+            System.out.println(color+rs.getString("TIMESTAMP")+"|["+rs.getString("ACCESS_IP")+"] " +rs.getString("CLIENT_TYPE")+" "+rs.getString("LOG_LEVEL")+" "+rs.getString("INFORMATION")+" "+rs.getString("ACTIVITY")+StringColor.ANSI_RESET);
             jsonObject.put("DATA",rs.getString("TIMESTAMP")+"|["+rs.getString("ACCESS_IP")+"] " +rs.getString("CLIENT_TYPE")+" "+rs.getString("LOG_LEVEL")+" "+rs.getString("INFORMATION")+" "+rs.getString("ACTIVITY"));
         }
         Custom_Server.sendToUser(jsonObject);
-        System.out.println(StringColor.ANSI_GREEN+"완료"+StringColor.ANSI_RESET);
     }
     static void logDataReset() throws SQLException {
         {
@@ -782,12 +832,12 @@ class DBAccessor{
         }
     }
     static void userConnectDataReset() throws SQLException {
-        System.out.println(StringColor.ANSI_GREEN+"접속자 정보 초기화"+StringColor.ANSI_RESET);
+        System.out.println("접속자 정보 초기화");
         String sql="UPDATE USER SET CONNECT_STATUS='DISCONNECT',ACCESSFORM='-'";
         Statement stmts=con.createStatement();
         stmts.executeUpdate(sql);
     }
-    ArrayList<String> findLocationsByRole(String role) throws Exception{
+    ArrayList<String> findLocationsByRole(String role) throws SQLException{
         String sql="SELECT LOCATION FROM ACCESS_PERMISSION WHERE ROLE='"+role+"'";
         Statement stmt= con.createStatement();
         ResultSet rs=stmt.executeQuery(sql);
@@ -848,26 +898,37 @@ class DBAccessor{
         }
         return result;
     }
+
+
 }
 class SDSecurity implements SecurityModule{
     static String key = "SECOMDALCOMSECURITYMODULEDEFAULTKEY";
     DBAccessor dbAccessor;
     SDSecurity(DBAccessor dbAccessor){
         this.dbAccessor=dbAccessor;
-        System.out.println(StringColor.ANSI_GREEN_BACKGROUND+"보안모듈실행"+StringColor.ANSI_RESET);
-        System.out.println(StringColor.ANSI_GREEN_BACKGROUND+"로그인 보안강화...   완료"+StringColor.ANSI_RESET);
-        System.out.println(StringColor.ANSI_GREEN_BACKGROUND+"로그 저장 기능 추가...   완료"+StringColor.ANSI_RESET);
-        System.out.println(StringColor.ANSI_GREEN_BACKGROUND+"통신 암호화...   완료"+StringColor.ANSI_RESET);
-        System.out.println(StringColor.ANSI_GREEN_BACKGROUND+"인젝션 방지 기능 추가...   완료"+StringColor.ANSI_RESET);
-        System.out.print(StringColor.ANSI_GREEN_BACKGROUND+"시스템 로그 모니터링 기능 추가...   ");
+        System.out.println(StringColor.ANSI_GREEN+"보안모듈실행"+StringColor.ANSI_RESET);
+        System.out.println(StringColor.ANSI_GREEN+"로그인 보안강화...   완료"+StringColor.ANSI_RESET);
+        System.out.println(StringColor.ANSI_GREEN+"로그 저장 기능 추가...   완료"+StringColor.ANSI_RESET);
+        System.out.println(StringColor.ANSI_GREEN+"통신 암호화...   완료"+StringColor.ANSI_RESET);
+        System.out.println(StringColor.ANSI_GREEN+"인젝션 방지 기능 추가...   완료"+StringColor.ANSI_RESET);
+        System.out.print(StringColor.ANSI_GREEN+"시스템 로그 모니터링 기능 추가...   ");
         new AuthTail(this.dbAccessor).start();
         new Fail2BanTail(this.dbAccessor).start();
         System.out.println("완료"+StringColor.ANSI_RESET);
     }
-
+    @Override
+    public boolean checkBanUser(String remoteSocketAddress) throws SQLException {
+        String sql="SELECT count(*) FROM BAN_LIST WHERE IP='"+remoteSocketAddress+"'";
+        Statement statement=dbAccessor.con.createStatement();
+        ResultSet rs=statement.executeQuery(sql);
+        while(rs.next()){
+            if(rs.getInt(1)>=1) {
+                return true;}
+        }
+        return false;
+    }
     @Override
     public void login_s(Custom_Server c,JSONObject jo) throws Exception {
-        System.out.print(StringColor.ANSI_YELLOW+"["+c.IP+"]에서 로그인 시도...\t"+StringColor.ANSI_RESET);
         int COUNT=0;
         String id = jo.getString("ID");
         String password = jo.getString("PASSWORD");
@@ -894,14 +955,12 @@ class SDSecurity implements SecurityModule{
             }
 
             if(status.equals("DISABLED")) {
-                System.out.println(StringColor.ANSI_RED+"로그인 실패 (사유:계정이 비활성화 상태입니다.)"+StringColor.ANSI_RESET);
                 response.put("RESPONSE_CODE", 4);
                 dbAccessor.saveLog(c.IP,id,jo.getString("SENDER_TYPE"),"WARNING","비활성화 계정 로그인 시도","LOGIN");
                 c.send(response.toString());
                 c.socket.close();
             }
             if(PASSWORD.equals(password)){
-                System.out.println(StringColor.ANSI_GREEN+"로그인 성공"+StringColor.ANSI_RESET);
                 c.name=id;
                 String token=this.createToken(id);
                 sql="UPDATE USER SET TOKEN ='"+token+"' WHERE USERNAME ='"+id+"'";
@@ -913,7 +972,6 @@ class SDSecurity implements SecurityModule{
                 c.socket.close();
             }
             else{
-                System.out.println(StringColor.ANSI_RED+"로그인 실패 (사유:비밀번호 실패)"+StringColor.ANSI_RESET);
                 response.put("RESPONSE_CODE", 3);
                 sql="SELECT NUMBER_OF_LOGIN_FAILURES FROM USER WHERE USERNAME='"+id+"'";
                 rs=stmt.executeQuery(sql);
@@ -928,6 +986,8 @@ class SDSecurity implements SecurityModule{
                         sql="UPDATE USER SET NUMBER_OF_LOGIN_FAILURES = 0,ACCOUNT_STATUS='DISABLED' WHERE USERNAME ='"+id+"'";
                         stmt.executeUpdate(sql);
                         dbAccessor.saveLog(c.IP,id,jo.getString("SENDER_TYPE"),"ERROR","비밀번호 입력 5회 실패","LOGIN");
+                        sql="INSERT IGNORE INTO BAN_LIST (IP,INFO) VALUES ('"+c.IP+"','비밀번호 5회 실패')";
+                        stmt.executeUpdate(sql);
                         c.send(response.toString());
                     }
                 }
@@ -938,7 +998,6 @@ class SDSecurity implements SecurityModule{
 
         }
         else {
-            System.out.println(StringColor.ANSI_RED+"로그인 실패 (사유:계정이 존재하지 않음)"+StringColor.ANSI_RESET);
             response.put("RESPONSE_CODE", 2);
             dbAccessor.saveLog(c.IP,id,jo.getString("SENDER_TYPE"),"WARNING","존재하지 않는 계정입니다","LOGIN");
             c.send(response.toString());
@@ -946,9 +1005,8 @@ class SDSecurity implements SecurityModule{
         }
     }
     @Override
-    public String createToken(String username) throws Exception
+    public String createToken(String username)
     {
-        System.out.print(StringColor.ANSI_YELLOW+"토큰 생성...\t"+StringColor.ANSI_RESET);
         Map<String, Object> headers = new HashMap<>();
         headers.put("typ", "JWT");
         headers.put("alg", "HS256");
@@ -965,14 +1023,12 @@ class SDSecurity implements SecurityModule{
                 .setClaims(payloads)
                 .signWith(SignatureAlgorithm.HS256, key.getBytes())
                 .compact();
-        System.out.println(StringColor.ANSI_GREEN+"생성 완료"+StringColor.ANSI_RESET);
         //System.out.println(jwt);
         return jwt;
     }
     @Override
-    public boolean validateToken(String jwtTokenString) throws Exception {
+    public boolean validateToken(String jwtTokenString) {
         boolean result;
-        System.out.print(StringColor.ANSI_YELLOW+"토큰 유효성 체크...\t"+StringColor.ANSI_RESET);
         try {
             Claims claims = Jwts.parser()
                     .setSigningKey(key.getBytes())
@@ -980,21 +1036,16 @@ class SDSecurity implements SecurityModule{
                     .getBody();
             Date expiration = claims.get("exp", Date.class);
             result=expiration.after(new Date());
-            System.out.println((result?StringColor.ANSI_GREEN+"완료":StringColor.ANSI_RED+"실패")+StringColor.ANSI_RESET);
             return result;
         }catch(Exception e) {
-            e.printStackTrace();
             return false;
         }
     }
     public String trimSpace(String src){
-        System.out.print(StringColor.ANSI_YELLOW+"데이터 공백제거...\t"+StringColor.ANSI_RESET);
         String result=src.replaceAll(" ","");
-        System.out.println(StringColor.ANSI_GREEN+"완료"+StringColor.ANSI_RESET);
         return result;
     }
     public boolean hasForbiddenCharacters(String src){
-        System.out.print(StringColor.ANSI_YELLOW+"문자 유효성 체크...\t"+StringColor.ANSI_RESET);
         JSONObject jo=new JSONObject(src);
         Iterator x = jo.keys();
         while (x.hasNext()){
@@ -1007,75 +1058,112 @@ class SDSecurity implements SecurityModule{
             }
             if(jo.getString(key).contains("\"")||jo.getString(key).contains("'")){System.out.println(StringColor.ANSI_RED+"제한된 문자 발견"+StringColor.ANSI_RESET); return true;}
         }
-        System.out.println(StringColor.ANSI_GREEN+"문자 이상 없음"+StringColor.ANSI_RESET);
         return false;
     }
 
     @Override
-    public JSONObject executeSecurityProcess(Custom_Server c,String src) throws Exception{
+    public JSONObject executeSecurityProcess(Custom_Server c,String src) throws SDSecurityException, UnsupportedEncodingException,IllegalArgumentException {
 //        System.out.println("원본 데이터 :   "+src);
         src=decryptData(src);
         src=trimSpace(src);
-        JSONObject jo=new JSONObject(src);
-        if(hasForbiddenCharacters(jo.toString())){
-            dbAccessor.saveLog(c.IP,c.name,jo.getString("SENDER_TYPE"),"WARNING","사용 금지된 문자 포함 오류",jo.getString("MESSAGE_TYPE"));
-            throw new Exception();
-        }
-        if(jo.getString("SENDER_TYPE").equals("SENSOR")||jo.getString("SENDER_TYPE").equals("ACTUATOR")||jo.getString("SENDER_TYPE").equals("COMPOUND")){
-            if(jo.getString("MESSAGE_TYPE").equals("INIT")){
-                if(dbAccessor.findMachineMacByName(jo.getString("NAME")).equals("00:00:00:00:00:00")){
-                    String sql="UPDATE MACHINE SET MAC_ADDRESS='"+jo.getString("MAC_ADDRESS")+"' WHERE NAME='"+jo.getString("NAME")+"'";
-                    Statement stmt= dbAccessor.con.createStatement();
-                    stmt.executeUpdate(sql);
+        JSONObject jo=null;
+        try {
+            try {
+                jo = new JSONObject(src);
+            }catch (Exception e){
+                try {
+                    dbAccessor.saveLog(c.IP,"","","WARNING","데이터의 형식이 유효하지 않습니다","");
+                }
+                catch (Exception e2){
+
                 }
             }
-            else{
-                System.out.println(jo.getString("MAC_ADDRESS"));
-                System.out.println(dbAccessor.findMachineMacByName(c.name));
-                if(!jo.getString("MAC_ADDRESS").equals(dbAccessor.findMachineMacByName(c.name))){
-                    System.out.println(StringColor.ANSI_RED+"등록되지 않은 기기입니다."+StringColor.ANSI_RESET);
-                    dbAccessor.saveLog(c.IP,c.name,jo.getString("SENDER_TYPE"),"WARNING","미인증기기 오류",jo.getString("MESSAGE_TYPE"));
-                    throw new Exception();
-                }
+            if(hasForbiddenCharacters(jo.toString())){
+                dbAccessor.saveLog(c.IP,c.name,jo.getString("SENDER_TYPE"),"WARNING","사용 금지된 문자 포함 오류",jo.getString("MESSAGE_TYPE"));
+                throw new SDSecurityException();
             }
-        }
-        if(jo.getString("SENDER_TYPE").equals("USER")&&!jo.getString("MESSAGE_TYPE").equals("LOGIN_REQUEST")){
-        if (!validateToken(jo.getString("TOKEN"))) {
-            System.out.println(StringColor.ANSI_RED+"토큰 유효성 오류"+StringColor.ANSI_RESET);
-            dbAccessor.saveLog(c.IP,c.name,jo.getString("SENDER_TYPE"),"WARNING","토큰 유효성 오류",jo.getString("MESSAGE_TYPE"));
-            throw new Exception();
-            }
-            if(!jo.getString("MESSAGE_TYPE").equals("INIT")&&!jo.getString("MESSAGE_TYPE").equals("ALIVE")){
-                boolean validateRole=false;
-                System.out.print(StringColor.ANSI_YELLOW+"접근 권한 체크...\t"+StringColor.ANSI_RESET);
-                for (String location:dbAccessor.findLocationsByRole(dbAccessor.findUserRoleByToken(jo.getString("TOKEN")))) {
-                    if(location.equals(jo.getString("FORM_TYPE"))){
-                        validateRole=true;
+            if(jo.getString("SENDER_TYPE").equals("SENSOR")||jo.getString("SENDER_TYPE").equals("ACTUATOR")||jo.getString("SENDER_TYPE").equals("COMPOUND")){
+                if(jo.getString("MESSAGE_TYPE").equals("INIT")){
+                    if(dbAccessor.findMachineMacByName(jo.getString("NAME")).equals("00:00:00:00:00:00")){
+                        String sql="UPDATE MACHINE SET MAC_ADDRESS='"+jo.getString("MAC_ADDRESS")+"' WHERE NAME='"+jo.getString("NAME")+"'";
+                        Statement stmt= dbAccessor.con.createStatement();
+                        stmt.executeUpdate(sql);
+                    }
+                    else{
+                        if(!jo.getString("MAC_ADDRESS").equals(dbAccessor.findMachineMacByName(jo.getString("NAME")))){
+                            dbAccessor.saveLog(c.IP,jo.getString("NAME"),jo.getString("SENDER_TYPE"),"WARNING","미인증기기 오류",jo.getString("MESSAGE_TYPE"));
+                            throw new SDSecurityException();
+                        }
                     }
                 }
-                if(!validateRole) {
-                    System.out.println(StringColor.ANSI_RED+"접근 권한 오류"+StringColor.ANSI_RESET);
-                    dbAccessor.saveLog(c.IP,c.name,jo.getString("SENDER_TYPE"),"WARNING","권한 오류",jo.getString("MESSAGE_TYPE"));
-                    throw new Exception();
+                else{
+                    //System.out.println("이름:"+c.name);
+                    if(!jo.getString("MAC_ADDRESS").equals(dbAccessor.findMachineMacByName(c.name))){
+                        dbAccessor.saveLog(c.IP,c.name,jo.getString("SENDER_TYPE"),"WARNING","미인증기기 오류",jo.getString("MESSAGE_TYPE"));
+                        throw new SDSecurityException();
+                    }
                 }
-                System.out.println(StringColor.ANSI_GREEN+"접근 권한 이상 없음"+StringColor.ANSI_RESET);
+
             }
+            if(jo.getString("SENDER_TYPE").equals("USER")&&!jo.getString("MESSAGE_TYPE").equals("LOGIN_REQUEST")){
+
+                if(!jo.has("TOKEN")){
+                    if(jo.getString("MESSAGE_TYPE").equals("INIT")){
+                        dbAccessor.saveLog(c.IP, jo.getString("NAME"), jo.getString("SENDER_TYPE"), "WARNING", "토큰 부재 오류", jo.getString("MESSAGE_TYPE"));
+                        throw new SDSecurityException();
+                    }
+                    else {
+                        dbAccessor.saveLog(c.IP, c.name, jo.getString("SENDER_TYPE"), "WARNING", "토큰 부재 오류", jo.getString("MESSAGE_TYPE"));
+                        throw new SDSecurityException();
+                    }
+                }
+
+                if (!validateToken(jo.getString("TOKEN"))) {
+                    if(jo.getString("MESSAGE_TYPE").equals("INIT")) {
+                        dbAccessor.saveLog(c.IP, jo.getString("NAME"), jo.getString("SENDER_TYPE"), "WARNING", "토큰 유효성 오류", jo.getString("MESSAGE_TYPE"));
+                        throw new SDSecurityException();
+                    }
+                    else{
+                        dbAccessor.saveLog(c.IP, c.name, jo.getString("SENDER_TYPE"), "WARNING", "토큰 유효성 오류", jo.getString("MESSAGE_TYPE"));
+                        throw new SDSecurityException();
+                    }
+                }
+                if(!jo.getString("MESSAGE_TYPE").equals("INIT")&&!jo.getString("MESSAGE_TYPE").equals("ALIVE")){
+                    boolean validateRole=false;
+                    for (String location:dbAccessor.findLocationsByRole(dbAccessor.findUserRoleByToken(jo.getString("TOKEN")))) {
+                        if(location.equals(jo.getString("FORM_TYPE"))){
+                            validateRole=true;
+                        }
+                    }
+                    if(!validateRole) {
+                        dbAccessor.saveLog(c.IP,c.name,jo.getString("SENDER_TYPE"),"WARNING","권한 오류",jo.getString("MESSAGE_TYPE"));
+                        throw new SDSecurityException();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            throw new SDSecurityException();
         }
+
+
         return jo;
     }
     @Override
-    public String encryptData(String src) throws Exception {
+    public String encryptData(String src) throws UnsupportedEncodingException {
         byte[] encodedBytes = Base64.getEncoder().encode(src.getBytes("UTF-8"));
         return new String(encodedBytes,"UTF-8");
     }
 
     @Override
-    public String decryptData(String src) throws Exception{
-        System.out.print(StringColor.ANSI_YELLOW+"암호화 데이터 복호화 시작...\t"+StringColor.ANSI_RESET);
+    public String decryptData(String src) throws UnsupportedEncodingException,IllegalArgumentException {
         byte[] decodedBytes = Base64.getDecoder().decode(src.getBytes("UTF-8"));
-        System.out.println(StringColor.ANSI_GREEN+"완료"+StringColor.ANSI_RESET);
-//        System.out.println("BASE64 복호화 결과: "+new String(decodedBytes,"UTF-8"));
         return new String(decodedBytes,"UTF-8");
+    }
+
+    public static class SDSecurityException extends Exception{
+        public SDSecurityException() {
+            super();
+        }
     }
 }
 
@@ -1115,7 +1203,6 @@ class AuthTail extends Thread {
 
     public void read() {
         try {
-            System.out.println("read");
             File file = new File(fileName);
             updateTime = file.lastModified();
             reader = new BufferedReader(new InputStreamReader(new FileInputStream(fileName)));
@@ -1150,12 +1237,10 @@ class AuthTail extends Thread {
                 }
             }
         } catch (Exception e) {
-            e.printStackTrace();
         } finally {
             try {
                 if(reader != null) {reader.close();}
             } catch(Exception e1) {
-                e1.printStackTrace();
             }
         }
     }
@@ -1180,7 +1265,6 @@ class Fail2BanTail extends Thread {
 
     public void read() {
         try {
-            System.out.println("read");
             File file = new File(fileName);
             updateTime = file.lastModified();
             reader = new BufferedReader(new InputStreamReader(new FileInputStream(fileName)));
@@ -1211,6 +1295,9 @@ class Fail2BanTail extends Thread {
                     switch(command){
                         case "Ban":
                             dbAccessor.saveLog(ip,"SYSTEM","-","ERROR","비정상적 접근으로 인하여 해당 IP 밴","SSH");
+                            String sql="INSERT IGNORE INTO BAN_LIST (IP,INFO) VALUES ('"+ip+"','시스템 비정상적 접근')";
+                            Statement stmt=dbAccessor.con.createStatement();
+                            stmt.executeUpdate(sql);
                             break;
                         default:
                             break;
@@ -1219,12 +1306,10 @@ class Fail2BanTail extends Thread {
                 }
             }
         } catch (Exception e) {
-            e.printStackTrace();
         } finally {
             try {
                 if(reader != null) {reader.close();}
             } catch(Exception e1) {
-                e1.printStackTrace();
             }
         }
     }
